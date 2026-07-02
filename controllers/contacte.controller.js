@@ -2,16 +2,12 @@ const Contacte = require("../models/Contacte");
 const sanitizeHtml = require('sanitize-html');
 const cloudinary = require("../utils/cloudinary");
 
-exports.getContacts = async (req, res) => {
-  const reqemail = req.user?.email;
-  if (reqemail !== process.env.EMAIL) {
-    return res.status(403).json({ message: 'Forbidden' });
-  }
+const extractCloudinaryPublicId = (url) => {
   try {
-    const contacts = await Contacte.find();
-    res.json(contacts); // Default status code is 200
-  } catch (error) {
-    res.status(500).json({ message: "An error occurred while fetching contacts", error });
+    const match = url.match(/\/upload\/(?:v\d+\/)?(.+)\.[a-zA-Z]+$/);
+    return match ? match[1] : null;
+  } catch {
+    return null;
   }
 };
 
@@ -76,15 +72,17 @@ exports.deleteUserContact = async (req, res) => {
     if (contact.email !== email) return res.status(403).json({ message: "Forbidden" });
 
     // Delete attachment from Cloudinary if exists
+    const toDelete = [];
     if (contact.attachment) {
-      try {
-        const urlParts = contact.attachment.split('/');
-        const fileWithExt = urlParts[urlParts.length - 1];
-        const publicId = `support_attachments/${fileWithExt.split('.')[0]}`;
-        await cloudinary.uploader.destroy(publicId);
-      } catch (cloudErr) {
-        console.error("Cloudinary delete error:", cloudErr.message);
-      }
+      const pid = extractCloudinaryPublicId(contact.attachment);
+      if (pid) toDelete.push(pid);
+    }
+    if (contact.adminReplyImage) {
+      const pid = extractCloudinaryPublicId(contact.adminReplyImage);
+      if (pid) toDelete.push(pid);
+    }
+    if (toDelete.length > 0) {
+      await Promise.allSettled(toDelete.map(pid => cloudinary.uploader.destroy(pid)));
     }
 
     await Contacte.findByIdAndDelete(req.params.id);

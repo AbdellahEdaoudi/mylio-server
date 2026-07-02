@@ -8,6 +8,15 @@ const Payment = require("../models/Payment");
 const { sendEmail, trialExpiredTemplate } = require("../utils/emailService");
 const cloudinary = require("../utils/cloudinary");
 
+const extractCloudinaryPublicId = (url) => {
+  try {
+    const match = url.match(/\/upload\/(?:v\d+\/)?(.+)\.[a-zA-Z]+$/);
+    return match ? match[1] : null;
+  } catch {
+    return null;
+  }
+};
+
 
 exports.GetDataApp = async (req, res) => {
   try {
@@ -42,13 +51,67 @@ exports.deleteUserById = async (req, res) => {
     return res.status(403).json({ message: "Forbidden" });
   }
   try {
-    const deletedUser = await User.findByIdAndDelete(id);
-    if (!deletedUser) {
+    const userToDelete = await User.findById(id).lean();
+    if (!userToDelete) {
       return res.status(404).json({ message: "User not found" });
     }
-    const userEmail = deletedUser.email;
+    const userEmail = userToDelete.email;
+
+    // ── Collect all Cloudinary public_ids to delete ──
+    const publicIds = [];
+
+    // 1. Profile image
+    if (userToDelete.urlimage) {
+      const pid = extractCloudinaryPublicId(userToDelete.urlimage);
+      if (pid) publicIds.push(pid);
+    }
+
+    // 2. Project images
+    if (Array.isArray(userToDelete.projects)) {
+      for (const project of userToDelete.projects) {
+        if (project.image) {
+          const pid = extractCloudinaryPublicId(project.image);
+          if (pid) publicIds.push(pid);
+        }
+      }
+    }
+
+    // 3. Certificate images
+    if (Array.isArray(userToDelete.certificates)) {
+      for (const cert of userToDelete.certificates) {
+        if (cert.cfimage) {
+          const pid = extractCloudinaryPublicId(cert.cfimage);
+          if (pid) publicIds.push(pid);
+        }
+      }
+    }
+
+    // 4. Contact attachments (user attachment + adminReplyImage)
+    const userContacts = await Contacte.find({ email: userEmail }).lean();
+    for (const contact of userContacts) {
+      if (contact.attachment) {
+        const pid = extractCloudinaryPublicId(contact.attachment);
+        if (pid) publicIds.push(pid);
+      }
+      if (contact.adminReplyImage) {
+        const pid = extractCloudinaryPublicId(contact.adminReplyImage);
+        if (pid) publicIds.push(pid);
+      }
+    }
+
+    // 5. Delete all images from Cloudinary in parallel (don't block on errors)
+    if (publicIds.length > 0) {
+      await Promise.allSettled(
+        publicIds.map(pid => cloudinary.uploader.destroy(pid))
+      );
+    }
+
+    // 6. Delete user + related DB records
+    await User.findByIdAndDelete(id);
     await Links.deleteMany({ useremail: userEmail });
     await Contacte.deleteMany({ email: userEmail });
+    await Payment.deleteMany({ useremail: userEmail });
+
     res.json({ message: "User and all associated data deleted successfully" });
   } catch (error) {
     res.status(400).json({ error: error.message });
@@ -67,20 +130,26 @@ exports.deleteContactById = async (req, res) => {
     }
 
     if (contact.attachment) {
-      const publicId = contact.attachment.split('/').pop().split('.')[0];
-      if (publicId) {
-        await cloudinary.uploader.destroy(`support_attachments/${publicId}`);
+      const pid = extractCloudinaryPublicId(contact.attachment);
+      if (pid) {
+        try { await cloudinary.uploader.destroy(pid); } catch (e) { console.error('Cloudinary delete error:', e.message); }
       }
     }
 
     if (contact.adminReplyImage) {
-      const publicId = contact.adminReplyImage.split('/').pop().split('.')[0];
-      if (publicId) {
-        await cloudinary.uploader.destroy(`admin_reply_images/${publicId}`);
+      const pid = extractCloudinaryPublicId(contact.adminReplyImage);
+      if (pid) {
+        try { await cloudinary.uploader.destroy(pid); } catch (e) { console.error('Cloudinary delete error:', e.message); }
       }
     }
 
     const deletedContact = await Contacte.findByIdAndDelete(req.params.id);
+    if (deletedContact) {
+      await User.updateOne(
+        { email: deletedContact.email },
+        { $currentDate: { updatedAt: true } }
+      );
+    }
     res.json({ message: "Contact deleted successfully", deletedContact }); // Default status code is 200
   } catch (error) {
     res.status(500).json({ message: "An error occurred while deleting the contact", error });
@@ -97,6 +166,12 @@ exports.deleteLinkById = async (req, res) => {
     const deletedLink = await Links.findByIdAndDelete(req.params.id);
     if (!deletedLink) {
       return res.status(404).json({ message: 'Link not found' });
+    }
+    if (deletedLink) {
+      await User.updateOne(
+        { email: deletedLink.useremail },
+        { $currentDate: { updatedAt: true } }
+      );
     }
     res.json({ message: 'Link deleted successfully' });
   } catch (error) {
