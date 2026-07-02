@@ -29,7 +29,7 @@ exports.getAllData = async (req, res) => {
         .select("-updatedAt -__v")
         .lean(),
 
-      Payment.findOne({ useremail: email })
+      Payment.findOne({ useremail: email, status: "ACTIVE" })
         .select("-createdAt -updatedAt -__v")
         .lean(),
     ]);

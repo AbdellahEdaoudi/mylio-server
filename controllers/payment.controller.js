@@ -1,5 +1,6 @@
 const Payment = require('../models/Payment');
 const paypal = require('../utils/paypalClient');
+const { sendEmail, paymentSuccessTemplate } = require('../utils/emailService');
 
 exports.createPayment = async (req, res) => {
   const email = req.user.email;
@@ -50,7 +51,7 @@ exports.createPayment = async (req, res) => {
       return res.status(400).json({ code: 'CANNOT_VERIFY_AMOUNT', message: 'Could not verify payment amount.' });
     }
 
-    if (capturedAmount !== 0.10) {
+    if (capturedAmount !== 100) {
       return res.status(400).json({ code: 'INVALID_PAYMENT_AMOUNT', message: `Invalid payment amount: $${capturedAmount}` });
     }
 
@@ -61,6 +62,14 @@ exports.createPayment = async (req, res) => {
       paypalPayerId: paypalOrder.payer?.payer_id,
       amount: capturedAmount,
     });
+
+    // Send confirmation email
+    try {
+      const emailContent = paymentSuccessTemplate(email.split('@')[0]);
+      await sendEmail(email, 'Payment Successful - Lifetime Access Activated', emailContent);
+    } catch (emailErr) {
+      console.error('Failed to send payment success email:', emailErr);
+    }
 
     return res.status(201).json({ message: 'Payment saved' });
 

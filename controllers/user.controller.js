@@ -53,7 +53,7 @@ exports.createUser = async (req, res) => {
   if (!req.user?.email) {
     return res.status(403).json({ message: "Forbidden" });
   }
-  const existingUser = await User.findOne({ email: req.user?.email });
+  const existingUser = await User.findOne({ email: req.user?.email }).select("-__v").lean();
   if (existingUser) {
     return res.status(200).json({
       message: "User already exists",
@@ -65,13 +65,17 @@ exports.createUser = async (req, res) => {
     email: req.user?.email,
     urlimage: "https://res.cloudinary.com/dssrnghtr/image/upload/v1761258566/dgmlr4uuim5swutkp6a8.png",
     bgcolorp: "#1f2937",
-    username: req.user?.email?.split("@")[0],
+    username: req.user?.email
+      ?.split("@")[0]
+      .replace(/[.\s/]/g, "")
+      .toLowerCase()
+      .substring(0, 30),
     theme: 1,
   };
   if (userData.username) {
     let finalUsername = userData.username;
     let counter = 1;
-    while (await User.findOne({ username: finalUsername })) {
+    while (await User.exists({ username: finalUsername })) {
       finalUsername = `${userData.username}${counter}`;
       counter++;
     }
@@ -111,11 +115,16 @@ exports.UpUserInfo = async (req, res) => {
       userData.fullname = userData.fullname.substring(0, 50);
     }
     if (userData.username) {
-      userData.username = userData.username.replace(/[.\s]/g, "").toLowerCase().substring(0, 30);
-      const existingUser = await User.findOne({ username: userData.username });
-      if (existingUser && existingUser.email !== email)
+      userData.username = userData.username.replace(/[.\s/]/g, "")
+        .toLowerCase()
+        .substring(0, 30);
+      const existingUser = await User.exists({
+        username: userData.username,
+        email: { $ne: email }
+      });
+      if (existingUser)
         return res.status(400).json({ error: "Username already exists" });
-    }
+      }
 
     const updatedUser = await User.findOneAndUpdate(
       { email },
@@ -138,7 +147,7 @@ exports.UpUserImage = async (req, res) => {
   try {
     let urlimage;
     let oldImageUrlToDelete = null;
-    const currentUser = await User.findOne({ email });
+    const currentUser = await User.findOne({ email }).select("urlimage").lean();
     
     if (!req.file) {
       urlimage = "https://res.cloudinary.com/dssrnghtr/image/upload/v1761258566/dgmlr4uuim5swutkp6a8.png";
@@ -466,7 +475,7 @@ exports.UpUserSectionOrder = async (req, res) => {
 // Get user by username
 exports.getUserByUsername = async (req, res) => {
   const { username } = req.params;
-  const user = await User.findOne({ username }).select("-__v");
+  const user = await User.findOne({ username }).select("-__v").lean();
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
@@ -476,21 +485,21 @@ exports.getUserByUsername = async (req, res) => {
   const isWithin30Days = thirtyDaysLater > now;
 
   if (isWithin30Days) {
-    const links = await Links.find({ useremail: user.email }).select("namelink link");
+    const links = await Links.find({ useremail: user.email }).select("namelink link").lean();
     return res.status(200).json({
       status: 200,
       user,
       links,
     });
   }
-  const payment = await Payment.findOne({ useremail: user.email, status: "ACTIVE" });
+  const payment = await Payment.findOne({ useremail: user.email, status: "ACTIVE" }).lean();
   if (!payment) {
     return res.status(404).json({ message: "No payment found for this user", email: user.email });
   }
   if (payment.status !== "ACTIVE") {
     return res.status(403).json({ message: "Your payment is not active. Please complete payment." });
   }
-  const links = await Links.find({ useremail: user.email }).select("namelink link");
+  const links = await Links.find({ useremail: user.email }).select("namelink link").lean();
   res.status(200).json({
     status: 200,
     user,
@@ -500,7 +509,7 @@ exports.getUserByUsername = async (req, res) => {
 // Get user by custom domain
 exports.getUserByCustomDomain = async (req, res) => {
   const { customDomain } = req.params;
-  const user = await User.findOne({ customDomainVerified: true, customDomain }).select("-__v");
+  const user = await User.findOne({ customDomainVerified: true, customDomain }).select("-__v").lean();
   if (!user) {
     return res.status(404).json({ message: "User not found" });
   }
@@ -510,21 +519,21 @@ exports.getUserByCustomDomain = async (req, res) => {
   const isWithin30Days = thirtyDaysLater > now;
 
   if (isWithin30Days) {
-    const links = await Links.find({ useremail: user.email }).select("namelink link");
+    const links = await Links.find({ useremail: user.email }).select("namelink link").lean();
     return res.status(200).json({
       status: 200,
       user,
       links,
     });
   }
-  const payment = await Payment.findOne({ useremail: user.email, status: "ACTIVE"  });
+  const payment = await Payment.findOne({ useremail: user.email, status: "ACTIVE" }).lean();
   if (!payment) {
     return res.status(404).json({ message: "No payment found for this user", email: user.email });
   }
   if (payment.status !== "ACTIVE") {
     return res.status(403).json({ message: "Your payment is not active. Please complete payment." });
   }
-  const links = await Links.find({ useremail: user.email }).select("namelink link");
+  const links = await Links.find({ useremail: user.email }).select("namelink link").lean();
   res.status(200).json({
     status: 200,
     user,
@@ -536,7 +545,7 @@ exports.getUserByUsernameMeta = async (req, res) => {
   const { username } = req.params;
   try {
     const user = await User.findOne({ username })
-      .select("fullname username urlimage category displayLanguage");
+      .select("fullname username urlimage category displayLanguage").lean();
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
@@ -552,7 +561,7 @@ exports.getUserByCustomDomainMeta = async (req, res) => {
   const { customDomain } = req.params;
   try {
     const user = await User.findOne({ customDomainVerified: true, customDomain })
-      .select("fullname username urlimage category displayLanguage");
+    .select("fullname username urlimage category displayLanguage").lean();
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }

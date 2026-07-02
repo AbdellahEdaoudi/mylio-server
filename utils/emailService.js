@@ -3,18 +3,18 @@ const nodemailer = require('nodemailer');
 const transporter = nodemailer.createTransport({
   service: 'gmail',
   pool: true, // Enable connection pooling
-  maxConnections: 5, // Limit concurrent connections
-  maxMessages: 100, // Limit messages per connection
+  maxConnections: 2, // Limit concurrent connections
+  maxMessages: 50, // Limit messages per connection
   auth: {
-    user: "dgt.portfolio.ma@gmail.com",
-    pass: "ppvk tunb tpir neht",
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS,
   },
 });
 
 exports.sendEmail = async (to, subject, htmlContent) => {
   try {
     const mailOptions = {
-      from: "dgt.portfolio.ma@gmail.com",
+      from: process.env.EMAIL_USER,
       to,
       subject,
       html: htmlContent,
@@ -109,6 +109,38 @@ exports.trialExpiredTemplate = (username) => `
       Don't let your professional image expire. One click keeps you live and reachable.
     </p>
 
+  </div>
+
+  <div style="background-color: #fafafa; padding: 8px; text-align: center; color: #8c8c8c; border-top: 1px solid #ededed; font-size: 11px;">
+    &copy; ${new Date().getFullYear()} DGT Portfolio. All rights reserved.
+  </div>
+
+</div>
+`;
+
+exports.paymentSuccessTemplate = (email) => `
+<div style="direction: ltr; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 650px; margin: 0 auto; background-color: #ffffff; border-radius: 10px; overflow: hidden; border: 1px solid #e5e5e5; font-size: 14px;">
+
+  <div style="text-align: center; padding: 10px 0; background: #fafafa; border-bottom: 1px solid #ededed;">
+    <img src="https://res.cloudinary.com/dynprvsfg/image/upload/v1765243945/DGTplogo_1_fpek3w.png" alt="DGT Portfolio" style="max-width: 100px; height: auto;" />
+  </div>
+
+  <div style="padding: 15px 20px; text-align: center;">
+    <h1 style="color: #0f0f0f; font-size: 20px; font-weight: 700; margin: 0 0 8px;">
+      Payment Successful 🎉
+    </h1>
+    
+    <div style="width: 40px; height: 2px; background-color: #000; margin: 0 auto 12px; border-radius: 2px;"></div>
+
+    <p style="color: #555; line-height: 1.5; margin: 0 0 12px;">
+      Hi <strong>${email}</strong>,<br/>
+      Your payment has been successfully processed.<br/>
+      Your Lifetime Portfolio access is now active and ready to use.
+    </p>
+
+    <a href="https://dgtportfolio.com" style="display: inline-block; background-color: #000; color: #fff; text-decoration: none; padding: 10px 30px; border-radius: 6px; font-weight: 600; font-size: 14px;">
+      Go to Dashboard
+    </a>
   </div>
 
   <div style="background-color: #fafafa; padding: 8px; text-align: center; color: #8c8c8c; border-top: 1px solid #ededed; font-size: 11px;">
