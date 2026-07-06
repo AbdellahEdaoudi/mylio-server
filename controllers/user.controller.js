@@ -506,40 +506,7 @@ exports.getUserByUsername = async (req, res) => {
     links,
   });
 };
-// Get user by custom domain
-exports.getUserByCustomDomain = async (req, res) => {
-  const { customDomain } = req.params;
-  const user = await User.findOne({ customDomainVerified: true, customDomain }).select("-__v").lean();
-  if (!user) {
-    return res.status(404).json({ message: "User not found" });
-  }
-  const createdAt = new Date(user.createdAt);
-  const thirtyDaysLater = new Date(createdAt.getTime() + 30 * 24 * 60 * 60 * 1000); // 30 days
-  const now = new Date();
-  const isWithin30Days = thirtyDaysLater > now;
 
-  if (isWithin30Days) {
-    const links = await Links.find({ useremail: user.email }).select("namelink link").lean();
-    return res.status(200).json({
-      status: 200,
-      user,
-      links,
-    });
-  }
-  const payment = await Payment.findOne({ useremail: user.email, status: "ACTIVE" }).lean();
-  if (!payment) {
-    return res.status(404).json({ message: "No payment found for this user", email: user.email });
-  }
-  if (payment.status !== "ACTIVE") {
-    return res.status(403).json({ message: "Your payment is not active. Please complete payment." });
-  }
-  const links = await Links.find({ useremail: user.email }).select("namelink link").lean();
-  res.status(200).json({
-    status: 200,
-    user,
-    links,
-  });
-};
 // Get user metadata by username
 exports.getUserByUsernameMeta = async (req, res) => {
   const { username } = req.params;
@@ -556,42 +523,16 @@ exports.getUserByUsernameMeta = async (req, res) => {
   }
 };
 
-// Get user metadata by custom domain
-exports.getUserByCustomDomainMeta = async (req, res) => {
-  const { customDomain } = req.params;
-  try {
-    const user = await User.findOne({ customDomainVerified: true, customDomain })
-    .select("fullname username urlimage category displayLanguage").lean();
-    if (!user) {
-      return res.status(404).json({ message: "User not found" });
-    }
 
-    res.json(user);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-};
 
-// Get all usernames for sitemap (including custom domains)
+// Get all usernames for sitemap
 exports.getActiveUsernames = async (req, res) => {
   try {
-    // Get all users that have a username
     const allUsers = await User.find({
       username: { $exists: true, $ne: "" }
-    })
-      .select("username customDomain customDomainVerified")
-      .lean();
-
-    // Extract usernames and custom domains
+    }).select("username").lean();
     const usernames = allUsers.map(user => user.username);
-    const customDomains = allUsers
-      .filter(user => user.customDomain && user.customDomainVerified)
-      .map(user => ({
-        username: user.username,
-        customDomain: user.customDomain
-      }));
-
-    res.json({ usernames, customDomains });
+    res.json({ usernames });
   } catch (error) {
     console.error("Error fetching usernames:", error);
     res.status(500).json({ error: error.message });

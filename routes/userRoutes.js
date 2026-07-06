@@ -6,9 +6,7 @@ const upload = require('../middlewares/multer');
 
 // User Routes
 router.get('/username/:username', UserController.getUserByUsername);
-router.get('/customdomain/:customDomain', UserController.getUserByCustomDomain);
 router.get('/metauser/:username', UserController.getUserByUsernameMeta);
-router.get('/metacustomdomain/:customDomain', UserController.getUserByCustomDomainMeta);
 router.post('/', isAuthenticated, UserController.createUser);
 // Update User Data
 router.put("/update/user-info", isAuthenticated, UserController.UpUserInfo);

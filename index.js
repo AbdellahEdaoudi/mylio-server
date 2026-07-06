@@ -27,7 +27,6 @@ app.use(express.urlencoded({ limit: "10mb", extended: true }));
 app.get("/alldata", isAuthenticated, generalController.getAllData);
 app.get("/last-updated", isAuthenticated, generalController.getLastUpdated);
 app.get("/last-updated/username/:username", generalController.getUserLastUpdated);
-app.get("/last-updated/customdomain/:customDomain", generalController.getCustomDomainLastUpdated);
 app.use('/users', require('./routes/userRoutes'));
 app.use('/users', require('./routes/user/projects.routes'));
 app.use('/users', require('./routes/user/experience.routes'));
@@ -37,8 +36,6 @@ app.use('/links', require('./routes/linksRoutes'));
 app.use('/contacts', require('./routes/contactsRoutes'));
 app.use('/admin', require('./routes/adminRoutes'));
 app.use('/api/payment', require('./routes/PaymentRoutes'));
-app.use("/api/custom-domain", require('./routes/customDomainRoutes'));
-
 // Serve Static Files and Handle 404
 app.use("/", express.static(path.join(__dirname, "public")));
 app.get('/', (req, res) => { res.sendFile(path.join(__dirname, "./Views/index.html")) })

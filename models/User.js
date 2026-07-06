@@ -73,15 +73,6 @@ const userSchema = new mongoose.Schema({
     type: String,
     default: "en",
   },
-  customDomain: {
-    type: String,
-    unique: true,
-    sparse: true, // Allows multiple null values
-  },
-  customDomainVerified: {
-    type: Boolean,
-    default: false,
-  },
 }, { timestamps: true });
 
 module.exports = mongoose.model("User", userSchema);

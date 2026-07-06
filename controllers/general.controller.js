@@ -113,35 +113,3 @@ exports.getUserLastUpdated = async (req, res) => {
   }
 };
 
-exports.getCustomDomainLastUpdated = async (req, res) => {
-  try {
-    const { customDomain } = req.params;
-    const user = await User.findOne({ customDomainVerified: true, customDomain }).select("email updatedAt").lean();
-    if (!user) {
-      return res.status(404).json({ success: false, message: "User not found" });
-    }
-    
-    const email = user.email;
-
-    const [links, payment] = await Promise.all([
-      Links.findOne({ useremail: email }).sort({ updatedAt: -1 }).select("updatedAt").lean(),
-      Payment.findOne({ useremail: email }).sort({ updatedAt: -1 }).select("updatedAt").lean(),
-    ]);
-
-    const dates = [
-      user?.updatedAt,
-      links?.updatedAt,
-      payment?.updatedAt
-    ].filter(Boolean).map(d => new Date(d).getTime());
-
-    const lastUpdated = dates.length > 0 ? Math.max(...dates) : null;
-
-    res.status(200).json({
-      success: true,
-      lastUpdated
-    });
-  } catch (error) {
-    console.error("Error in getCustomDomainLastUpdated:", error);
-    res.status(500).json({ success: false, error: error.message });
-  }
-};

@@ -52,7 +52,7 @@ exports.welcomeTemplate = (username) => `
     </p>
     
    
-    <a href="https://dgtportfolio.com/update-profile"
+    <a href="https://mylio.site/update-profile"
       style="display: inline-block; background-color: #000; color: #fff; text-decoration: none; padding: 12px 34px; border-radius: 8px; font-weight: 600; font-size: 15px;">
       Create My Portfolio
     </a>
@@ -98,10 +98,10 @@ exports.trialExpiredTemplate = (username) => `
 
     <div style="margin-bottom: 15px; direction: ltr;">
       <span style="font-size: 13px; font-weight: 600; color: #333;">Unlock Link: </span>
-      <a href="https://dgtportfolio.com/payment" style="font-size: 13px; color: #2563eb; text-decoration: underline;">https://dgtportfolio.com/payment</a>
+      <a href="https://mylio.site/payment" style="font-size: 13px; color: #2563eb; text-decoration: underline;">https://mylio.site/payment</a>
     </div>
 
-    <a href="https://dgtportfolio.com/payment" style="display: inline-block; background-color: #000; color: #fff; text-decoration: none; padding: 10px 30px; border-radius: 6px; font-weight: 600; font-size: 14px;">
+    <a href="https://mylio.site/payment" style="display: inline-block; background-color: #000; color: #fff; text-decoration: none; padding: 10px 30px; border-radius: 6px; font-weight: 600; font-size: 14px;">
       Keep My Portfolio Online
     </a>
 
@@ -138,7 +138,7 @@ exports.paymentSuccessTemplate = (email) => `
       Your Lifetime Portfolio access is now active and ready to use.
     </p>
 
-    <a href="https://dgtportfolio.com" style="display: inline-block; background-color: #000; color: #fff; text-decoration: none; padding: 10px 30px; border-radius: 6px; font-weight: 600; font-size: 14px;">
+    <a href="https://mylio.site" style="display: inline-block; background-color: #000; color: #fff; text-decoration: none; padding: 10px 30px; border-radius: 6px; font-weight: 600; font-size: 14px;">
       Go to Dashboard
     </a>
   </div>
