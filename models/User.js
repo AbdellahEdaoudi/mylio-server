@@ -1,15 +1,50 @@
 const mongoose = require("mongoose");
 
 const userSchema = new mongoose.Schema({
-  fullname: String,
-  email: { type: String, unique: true, required: true },
-  username: {type:String,unique:true,sparse:true},
+  fullname: {
+    type: String,
+    required: [true, "Full name is required"],
+    trim: true,
+    maxlength: [50, "Full name cannot exceed 50 characters"],
+  },
+  email: {
+    type: String,
+    trim: true,
+    lowercase: true,
+    maxlength: [100, "Email cannot exceed 100 characters"],
+    default: "",
+  },
+  username: {
+    type: String,
+    trim: true,
+    unique: true,
+    sparse: true,
+    lowercase: true,
+    index: true,
+    maxlength: [30, "Username cannot exceed 30 characters"],
+  },
+  password: {
+    type: String,
+    trim: true,
+    select: false,
+  },
+  role: {
+    type: String,
+    enum: ["user", "admin"],
+    default: "user",
+    index: true,
+  },
   phoneNumber: String,
-  country: String,
+  location: String,
   category: String,
-  urlimage: String,
-  displayEmail: String,
-  bgcolorp: String,
+  urlimage: {
+    type: String,
+    default: "https://res.cloudinary.com/dssrnghtr/image/upload/v1761258566/dgmlr4uuim5swutkp6a8.png",
+  },
+  bgcolor: {
+    type: String,
+    default: "#1f2937",
+  },
   about: String,
   languages: [String],
   services: [String],
@@ -66,13 +101,16 @@ const userSchema = new mongoose.Schema({
   },
   sectionOrder: {
     type: [String],
-    default: ["services", "experience", "skills", "projects", "education", "certificates", "languages"]
+    default: ["services", "experience", "skills", "projects", "education", "certificates", "languages"],
   },
-  theme: Number,
+  theme: {
+    type: Number,
+    default: 1,
+  },
   displayLanguage: {
     type: String,
     default: "en",
   },
 }, { timestamps: true });
 
-module.exports = mongoose.model("User", userSchema);
+module.exports = mongoose.models.User || mongoose.model("User", userSchema);

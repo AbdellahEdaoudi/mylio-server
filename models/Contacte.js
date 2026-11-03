@@ -1,12 +1,66 @@
 const mongoose = require('mongoose');
+const { Schema, model, models } = mongoose;
 
-const contactSchema = new mongoose.Schema({
-  email: { type: String, required: true },
-  subject: { type: String },
-  message: { type: String, required: true },
-  attachment: { type: String },
-  adminReply: { type: String, default: "" },
-  adminReplyImage: { type: String, default: "" },
-}, { timestamps: true });
+const contactSchema = new Schema(
+  {
+    user: {
+      type: Schema.Types.ObjectId,
+      ref: 'User',
+      required: true,
+      index: true,
+    },
+    subject: {
+      type: String,
+      required: true,
+      trim: true,
+      maxlength: 200,
+    },
+    messages: [
+      {
+        sender: {
+          type: Schema.Types.ObjectId,
+          ref: 'User',
+          required: true,
+        },
+        senderRole: {
+          type: String,
+          enum: ['user', 'admin'],
+          required: true,
+        },
+        message: {
+          type: String,
+          required: true,
+          trim: true,
+          maxlength: 5000,
+        },
+        imageUrl: {
+          type: String,
+          default: null,
+        },
+        isEdited: {
+          type: Boolean,
+          default: false,
+        },
+        editedAt: {
+          type: Date,
+          default: null,
+        },
+        isDeleted: {
+          type: Boolean,
+          default: false,
+        },
+        deletedAt: {
+          type: Date,
+          default: null,
+        },
+        createdAt: {
+          type: Date,
+          default: Date.now,
+        },
+      },
+    ],
+  },
+  { timestamps: true }
+);
 
-module.exports = mongoose.models.Contact || mongoose.model('Contact', contactSchema);
+module.exports = models.Contact || model('Contact', contactSchema);

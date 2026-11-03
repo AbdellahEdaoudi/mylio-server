@@ -1,53 +1,153 @@
-// controller/general.controller.js
+// controller/admin.controller.js
 const User = require("../models/User");
-const Links = require("../models/Links");
-const Contact = require("../models/Contacte");
 const Contacte = require("../models/Contacte");
 const Payment = require("../models/Payment");
 
-const { sendEmail, trialExpiredTemplate } = require("../utils/emailService");
 const cloudinary = require("../utils/cloudinary");
 
 const extractCloudinaryPublicId = (url) => {
+  if (!url || typeof url !== "string" || !url.includes("cloudinary.com")) return null;
+  // Guard: Never delete the shared default avatar
+  if (url.includes("dgmlr4uuim5swutkp6a8")) return null;
   try {
-    const match = url.match(/\/upload\/(?:v\d+\/)?(.+)\.[a-zA-Z]+$/);
-    return match ? match[1] : null;
+    const pathname = new URL(url).pathname;
+    const parts = pathname.split("/");
+    const uploadIdx = parts.indexOf("upload");
+    if (uploadIdx === -1) return null;
+    const fileParts = parts.slice(uploadIdx + 1);
+    const versionIdx = fileParts.findIndex((p) => /^v\d+$/.test(p));
+    if (versionIdx !== -1) {
+      return fileParts.slice(versionIdx + 1).join("/").replace(/\.[^/.]+$/, "");
+    }
+    return fileParts.join("/").replace(/\.[^/.]+$/, "");
   } catch {
-    return null;
+    try {
+      const match = url.match(/\/upload\/(?:v\d+\/)?(.+)\.[a-zA-Z]+$/);
+      return match ? match[1] : null;
+    } catch {
+      return null;
+    }
   }
 };
 
+const destroyCloudinaryAsset = async (publicIdOrUrl) => {
+  if (!publicIdOrUrl) return;
+  const publicId =
+    typeof publicIdOrUrl === "string" && publicIdOrUrl.includes("cloudinary.com")
+      ? extractCloudinaryPublicId(publicIdOrUrl)
+      : publicIdOrUrl;
+  if (!publicId) return;
+  try {
+    await cloudinary.uploader.destroy(publicId);
+  } catch (err) {
+    console.error("Cloudinary destroy failed:", err?.message || err);
+  }
+};
+
+const cleanText = (value) =>
+  String(value || "")
+    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, "")
+    .replace(/<[^>]+>/g, "")
+    .trim();
+
+const collectContactImageIds = (contactDoc) => {
+  const ids = [];
+  if (contactDoc?.imageUrl) {
+    const pid = extractCloudinaryPublicId(contactDoc.imageUrl);
+    if (pid) ids.push(pid);
+  }
+  if (contactDoc?.attachment) {
+    const pid = extractCloudinaryPublicId(contactDoc.attachment);
+    if (pid) ids.push(pid);
+  }
+  if (contactDoc?.adminReplyImage) {
+    const pid = extractCloudinaryPublicId(contactDoc.adminReplyImage);
+    if (pid) ids.push(pid);
+  }
+  (contactDoc?.messages || []).forEach((m) => {
+    if (m.imageUrl) {
+      const pid = extractCloudinaryPublicId(m.imageUrl);
+      if (pid) ids.push(pid);
+    }
+  });
+  return [...new Set(ids.filter(Boolean))];
+};
+
+const resolveAdminImageUpload = async (req) => {
+  if (req.file) {
+    return await cloudinary.uploadImageBuffer(req.file.buffer, "MessagesImage");
+  }
+  const base64 = req.body.replyImageBase64 || req.body.attachment || req.body.image;
+  if (base64 && typeof base64 === "string" && base64.startsWith("data:image")) {
+    return await cloudinary.uploader.upload(base64, {
+      folder: "MessagesImage",
+      transformation: [
+        { width: 1200, height: 1200, crop: "limit", quality: "auto", fetch_format: "auto" },
+      ],
+    });
+  }
+  return null;
+};
+
+const isAdminUser = (user) => {
+  if (!user) return false;
+  return user.role === "admin";
+};
 
 exports.GetDataApp = async (req, res) => {
   try {
-    const email = req.user?.email;
-    if (email !== process.env.EMAIL) {
-      return res.json({ success: false, message: "data count 0" });
+    if (!isAdminUser(req.user)) {
+      return res.status(403).json({ success: false, message: "Forbidden" });
     }
-    const [users, links, contacts, payment] = await Promise.all([
-      User.find().collation({ locale: "en", strength: 1 }).sort({ fullname: 1 })
-        .select("about fullname email username country category createdAt urlimage theme").lean(),
-      Links.find().select("-__v").lean(),
-      Contact.find().select("-__v").lean(),
-      Payment.find().select("-__v").lean(),
+    const [users, contacts, payment] = await Promise.all([
+      User.find()
+        .collation({ locale: "en", strength: 1 })
+        .sort({ fullname: 1 })
+        .select("about fullname email username role location category createdAt urlimage theme")
+        .lean(),
+      Contacte.find()
+        .populate("user", "fullname username email urlimage role phoneNumber location")
+        .populate("messages.sender", "fullname username email urlimage role phoneNumber")
+        .sort({ updatedAt: -1 })
+        .select("-__v")
+        .lean(),
+      Payment.find()
+        .populate("user", "fullname username email urlimage")
+        .select("-__v")
+        .lean(),
     ]);
     res.status(200).json({
       success: true,
       users,
-      links,
       contacts,
-      payment
+      payment,
     });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
 };
 
+exports.getAllContacts = async (req, res) => {
+  if (!isAdminUser(req.user)) {
+    return res.status(403).json({ message: "Forbidden" });
+  }
+  try {
+    const contacts = await Contacte.find()
+      .populate("user", "fullname username email urlimage role phoneNumber location")
+      .populate("messages.sender", "fullname username email urlimage role phoneNumber")
+      .sort({ updatedAt: -1 });
+
+    res.json(contacts);
+  } catch (error) {
+    console.error("[Admin Get Contacts Error]:", error);
+    res.status(500).json({ message: "Failed to fetch contact inquiries" });
+  }
+};
+
 // Delete user by ID
 exports.deleteUserById = async (req, res) => {
   const { id } = req.params;
-  const email = req.user.email
-  if (email !== process.env.EMAIL) {
+  if (!isAdminUser(req.user)) {
     return res.status(403).json({ message: "Forbidden" });
   }
   try {
@@ -55,7 +155,6 @@ exports.deleteUserById = async (req, res) => {
     if (!userToDelete) {
       return res.status(404).json({ message: "User not found" });
     }
-    const userEmail = userToDelete.email;
 
     // ── Collect all Cloudinary public_ids to delete ──
     const publicIds = [];
@@ -86,31 +185,23 @@ exports.deleteUserById = async (req, res) => {
       }
     }
 
-    // 4. Contact attachments (user attachment + adminReplyImage)
-    const userContacts = await Contacte.find({ email: userEmail }).lean();
+    // 4. Contact conversation images
+    const userContacts = await Contacte.find({ user: id }).lean();
     for (const contact of userContacts) {
-      if (contact.attachment) {
-        const pid = extractCloudinaryPublicId(contact.attachment);
-        if (pid) publicIds.push(pid);
-      }
-      if (contact.adminReplyImage) {
-        const pid = extractCloudinaryPublicId(contact.adminReplyImage);
-        if (pid) publicIds.push(pid);
-      }
+      collectContactImageIds(contact).forEach((pid) => publicIds.push(pid));
     }
 
     // 5. Delete all images from Cloudinary in parallel (don't block on errors)
     if (publicIds.length > 0) {
       await Promise.allSettled(
-        publicIds.map(pid => cloudinary.uploader.destroy(pid))
+        publicIds.map((pid) => cloudinary.uploader.destroy(pid))
       );
     }
 
     // 6. Delete user + related DB records
     await User.findByIdAndDelete(id);
-    await Links.deleteMany({ useremail: userEmail });
-    await Contacte.deleteMany({ email: userEmail });
-    await Payment.deleteMany({ useremail: userEmail });
+    await Contacte.deleteMany({ user: id });
+    await Payment.deleteMany({ user: id });
 
     res.json({ message: "User and all associated data deleted successfully" });
   } catch (error) {
@@ -119,9 +210,8 @@ exports.deleteUserById = async (req, res) => {
 };
 
 exports.deleteContactById = async (req, res) => {
-  const reqemail = req.user?.email;
-  if (reqemail !== process.env.EMAIL) {
-    return res.status(403).json({ message: 'Forbidden' });
+  if (!isAdminUser(req.user)) {
+    return res.status(403).json({ message: "Forbidden" });
   }
   try {
     const contact = await Contacte.findById(req.params.id);
@@ -129,111 +219,27 @@ exports.deleteContactById = async (req, res) => {
       return res.status(404).json({ message: "Contact not found" });
     }
 
-    if (contact.attachment) {
-      const pid = extractCloudinaryPublicId(contact.attachment);
-      if (pid) {
-        try { await cloudinary.uploader.destroy(pid); } catch (e) { console.error('Cloudinary delete error:', e.message); }
-      }
-    }
-
-    if (contact.adminReplyImage) {
-      const pid = extractCloudinaryPublicId(contact.adminReplyImage);
-      if (pid) {
-        try { await cloudinary.uploader.destroy(pid); } catch (e) { console.error('Cloudinary delete error:', e.message); }
-      }
+    const imageIds = collectContactImageIds(contact);
+    for (const pid of imageIds) {
+      await destroyCloudinaryAsset(pid);
     }
 
     const deletedContact = await Contacte.findByIdAndDelete(req.params.id);
-    if (deletedContact) {
+    if (deletedContact && deletedContact.user) {
       await User.updateOne(
-        { email: deletedContact.email },
+        { _id: deletedContact.user },
         { $currentDate: { updatedAt: true } }
       );
     }
-    res.json({ message: "Contact deleted successfully", deletedContact }); // Default status code is 200
+    res.json({ message: "Contact conversation and all attachments deleted successfully", deletedContact });
   } catch (error) {
     res.status(500).json({ message: "An error occurred while deleting the contact", error });
   }
 };
 
-// Delete a link by ID
-exports.deleteLinkById = async (req, res) => {
-  const reqemail = req.user?.email;
-  if (reqemail !== process.env.EMAIL) {
-    return res.status(403).json({ message: 'Forbidden' });
-  }
-  try {
-    const deletedLink = await Links.findByIdAndDelete(req.params.id);
-    if (!deletedLink) {
-      return res.status(404).json({ message: 'Link not found' });
-    }
-    if (deletedLink) {
-      await User.updateOne(
-        { email: deletedLink.useremail },
-        { $currentDate: { updatedAt: true } }
-      );
-    }
-    res.json({ message: 'Link deleted successfully' });
-  } catch (error) {
-    res.status(500).json({ message: 'Error deleting link', error: error.message });
-  }
-};
-
-// Send Single Bulk Email
-// Send Bulk Emails (Handles both single and batch)
-exports.sendBulkEmails = async (req, res) => {
-  const reqemail = req.user?.email;
-  if (reqemail !== process.env.EMAIL) {
-    return res.status(403).json({ message: 'Forbidden' });
-  }
-
-  const { email, emails, subject, content } = req.body;
-  let recipients = [];
-
-  // Determine recipients list
-  if (emails && Array.isArray(emails)) {
-    recipients = emails;
-  } else if (email && typeof email === 'string') {
-    recipients = [email];
-  } else {
-    return res.status(400).json({ message: "Invalid recipients" });
-  }
-
-  if (!content) {
-    return res.status(400).json({ message: "Content is required" });
-  }
-
-  try {
-    let successCount = 0;
-    let failedCount = 0;
-
-    for (const recipient of recipients) {
-      try {
-        await sendEmail(recipient, subject || "DGT Portfolio", content);
-        successCount++;
-      } catch (err) {
-        console.error(`Failed to send to ${recipient}:`, err);
-        failedCount++;
-      }
-    }
-
-    res.json({
-      success: true,
-      message: `Processed ${recipients.length} emails. Sent: ${successCount}, Failed: ${failedCount}`,
-      sentCount: successCount,
-      failedCount: failedCount
-    });
-
-  } catch (error) {
-    console.error("Bulk email error:", error);
-    res.status(500).json({ error: error.message });
-  }
-};
-
 // Get Cloudinary Images (and Folders)
 exports.getCloudinaryImages = async (req, res) => {
-  const reqemail = req.user?.email;
-  if (reqemail !== process.env.EMAIL) {
+  if (!isAdminUser(req.user)) {
     return res.status(403).json({ message: 'Forbidden' });
   }
 
@@ -296,8 +302,7 @@ exports.getCloudinaryImages = async (req, res) => {
 
 // Delete Cloudinary Image
 exports.deleteCloudinaryImage = async (req, res) => {
-  const reqemail = req.user?.email;
-  if (reqemail !== process.env.EMAIL) {
+  if (!isAdminUser(req.user)) {
     return res.status(403).json({ message: 'Forbidden' });
   }
 
@@ -325,110 +330,226 @@ exports.deleteCloudinaryImage = async (req, res) => {
   }
 };
 
-// Reply to a user's contact message
+// Reply to a user's contact conversation
 exports.replyToContact = async (req, res) => {
-  const reqemail = req.user?.email;
-  if (reqemail !== process.env.EMAIL) {
-    return res.status(403).json({ message: 'Forbidden' });
+  if (!isAdminUser(req.user)) {
+    return res.status(403).json({ message: "Forbidden" });
   }
 
-  const { id } = req.params;
-  const { reply, replyImageBase64, sendEmailFlag } = req.body;
-
-  if (reply === undefined) {
-    return res.status(400).json({ message: "Reply content is required" });
-  }
+  let uploadedPublicId = null;
 
   try {
+    const { id } = req.params;
     const contact = await Contacte.findById(id);
+    if (!contact) {
+      return res.status(404).json({ message: "Contact message not found" });
+    }
+
+    const rawText = req.body.message !== undefined ? req.body.message : req.body.reply;
+    const message = cleanText(rawText);
+
+    let imageUrl = null;
+    const uploaded = await resolveAdminImageUpload(req);
+    if (uploaded) {
+      imageUrl = uploaded.secure_url;
+      uploadedPublicId = uploaded.public_id;
+    }
+
+    if (!message && !imageUrl) {
+      return res.status(400).json({ message: "Reply message or image is required." });
+    }
+
+    if (message.length > 5000) {
+      return res.status(400).json({ message: "Reply message must not exceed 5000 characters." });
+    }
+
+    contact.messages.push({
+      senderRole: "admin",
+      sender: req.user.id,
+      message: message || " ",
+      ...(imageUrl && { imageUrl }),
+    });
+
+    await contact.save();
+    uploadedPublicId = null;
+
+    await contact.populate([
+      { path: "user", select: "fullname username email urlimage role phoneNumber location" },
+      { path: "messages.sender", select: "fullname username email urlimage role phoneNumber" },
+    ]);
+
+    res.json({ message: "Reply sent successfully", contact });
+  } catch (error) {
+    if (uploadedPublicId) {
+      try {
+        await destroyCloudinaryAsset(uploadedPublicId);
+      } catch (cleanErr) {
+        console.error("Image cleanup failed:", cleanErr);
+      }
+    }
+    console.error("[Admin Reply Contact Error]:", error);
+    res.status(500).json({ message: "Failed to send reply", error: error.message });
+  }
+};
+
+// Admin edits a reply in a contact conversation
+exports.updateReply = async (req, res) => {
+  if (!isAdminUser(req.user)) {
+    return res.status(403).json({ message: "Forbidden" });
+  }
+
+  let uploadedPublicId = null;
+
+  try {
+    const { id, messageId } = req.params;
+    const contact = await Contacte.findById(id);
+
     if (!contact) {
       return res.status(404).json({ message: "Contact not found" });
     }
 
-    contact.adminReply = reply;
+    const msg = contact.messages.id(messageId);
+    if (!msg) {
+      return res.status(404).json({ message: "Reply not found" });
+    }
 
-    // Delete old image if a new image is provided or if it is explicitly cleared
-    if ((replyImageBase64 || replyImageBase64 === null) && contact.adminReplyImage) {
-      const publicId = contact.adminReplyImage.split('/').pop().split('.')[0];
-      if (publicId) {
-        try {
-          await cloudinary.uploader.destroy(`admin_reply_images/${publicId}`);
-        } catch (delErr) {
-          console.error("Failed to delete old reply image:", delErr);
-        }
+    if (msg.isDeleted) {
+      return res.status(400).json({ message: "Cannot edit a deleted reply." });
+    }
+
+    const rawText = req.body.message !== undefined ? req.body.message : req.body.reply;
+    if (rawText !== undefined) {
+      const text = cleanText(rawText);
+      if (!text || text.length > 5000) {
+        return res.status(400).json({ message: "Reply text is required (max 5000 characters)." });
+      }
+      msg.message = text;
+    }
+
+    const uploaded = await resolveAdminImageUpload(req);
+    if (uploaded) {
+      if (msg.imageUrl) {
+        await destroyCloudinaryAsset(msg.imageUrl);
+      }
+      uploadedPublicId = uploaded.public_id;
+      msg.imageUrl = uploaded.secure_url;
+      uploadedPublicId = null;
+    } else if (
+      req.body.removeImage === "true" ||
+      req.body.removeImage === true ||
+      req.body.replyImageBase64 === null
+    ) {
+      if (msg.imageUrl) {
+        await destroyCloudinaryAsset(msg.imageUrl);
+        msg.imageUrl = null;
       }
     }
 
-    // Upload image to Cloudinary if provided
-    if (replyImageBase64) {
-      try {
-        const uploadResult = await cloudinary.uploader.upload(replyImageBase64, {
-          folder: "admin_reply_images",
-          resource_type: "image",
-        });
-        contact.adminReplyImage = uploadResult.secure_url;
-      } catch (imgErr) {
-        console.error("Failed to upload reply image:", imgErr);
-      }
-    } else if (replyImageBase64 === null) {
-      // Clear image only if explicitly requested
-      contact.adminReplyImage = "";
-    }
+    msg.isEdited = true;
+    msg.editedAt = new Date();
 
     await contact.save();
 
-    // Optionally send an email
-    if (sendEmailFlag) {
+    await contact.populate([
+      { path: "user", select: "fullname username email urlimage role phoneNumber location" },
+      { path: "messages.sender", select: "fullname username email urlimage role phoneNumber" },
+    ]);
+
+    res.json({ message: "Reply updated successfully", contact });
+  } catch (error) {
+    if (uploadedPublicId) {
       try {
-        const emailHtml = `
-          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-            <h2 style="color: #1e293b;">Reply to your message</h2>
-            <p style="color: #475569;"><strong>Subject:</strong> ${contact.subject || "Your Message"}</p>
-            <div style="background: #f8fafc; border-left: 4px solid #0ea5e9; padding: 15px; margin: 15px 0; border-radius: 4px;">
-              <p style="color: #1e293b; margin: 0; white-space: pre-wrap;">${reply}</p>
-            </div>
-            ${contact.adminReplyImage ? `<img src="${contact.adminReplyImage}" style="max-width:100%; border-radius:8px; margin-top:10px;" alt="Reply Image" />` : ""}
-            <p style="color: #94a3b8; font-size: 12px; margin-top: 20px;">DGT Portfolio Support Team</p>
-          </div>
-        `;
-        await sendEmail(contact.email, "Reply: " + (contact.subject || "Your Message"), emailHtml);
-      } catch (emailErr) {
-        console.error("Failed to send reply email:", emailErr);
+        await destroyCloudinaryAsset(uploadedPublicId);
+      } catch (cleanErr) {
+        console.error("Image cleanup failed:", cleanErr);
       }
     }
+    console.error("[Admin Update Reply Error]:", error);
+    res.status(500).json({ message: "Failed to update reply" });
+  }
+};
 
-    res.json({ message: "Reply saved successfully", contact });
+// Admin deletes a specific reply (WhatsApp style soft-delete + Cloudinary image deletion)
+exports.deleteReply = async (req, res) => {
+  if (!isAdminUser(req.user)) {
+    return res.status(403).json({ message: "Forbidden" });
+  }
+
+  try {
+    const { id, messageId } = req.params;
+    const contact = await Contacte.findById(id);
+
+    if (!contact) {
+      return res.status(404).json({ message: "Contact not found" });
+    }
+
+    const msg = contact.messages.id(messageId);
+    if (!msg) {
+      return res.status(404).json({ message: "Reply not found" });
+    }
+
+    if (msg.isDeleted) {
+      return res.status(400).json({ message: "Reply is already deleted." });
+    }
+
+    if (msg.imageUrl) {
+      await destroyCloudinaryAsset(msg.imageUrl);
+      msg.imageUrl = null;
+    }
+
+    msg.isDeleted = true;
+    msg.deletedAt = new Date();
+    msg.message = "This message was deleted";
+
+    await contact.save();
+
+    await contact.populate([
+      { path: "user", select: "fullname username email urlimage role phoneNumber location" },
+      { path: "messages.sender", select: "fullname username email urlimage role phoneNumber" },
+    ]);
+
+    res.json({ message: "Reply deleted successfully", contact });
   } catch (error) {
-    console.error("Error replying to contact:", error);
-    res.status(500).json({ message: "Failed to save reply", error: error.message });
+    console.error("[Admin Delete Reply Error]:", error);
+    res.status(500).json({ message: "Failed to delete reply" });
   }
 };
 
 // Manually create payment for a user (admin action)
 exports.createPaymentManually = async (req, res) => {
-  const reqemail = req.user?.email;
-  if (reqemail !== process.env.EMAIL) {
+  if (!isAdminUser(req.user)) {
     return res.status(403).json({ message: 'Forbidden' });
   }
 
-  const { useremail } = req.body;
-  if (!useremail) {
-    return res.status(400).json({ message: "User email is required" });
+  const { username, userId } = req.body;
+  const identifier = (username || "").trim().toLowerCase();
+  if (!identifier && !userId) {
+    return res.status(400).json({ message: "Username is required" });
   }
 
   try {
-    let payment = await Payment.findOne({ useremail });
+    const targetUser = userId
+      ? await User.findById(userId)
+      : await User.findOne({ username: identifier });
+
+    if (!targetUser) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    let payment = await Payment.findOne({ user: targetUser._id });
     if (payment) {
       payment.status = "ACTIVE";
       await payment.save();
+      await payment.populate("user", "fullname username email urlimage");
       return res.json({ message: "Payment updated to ACTIVE", payment });
     }
     payment = await Payment.create({
-      useremail,
+      user: targetUser._id,
       status: "ACTIVE",
       paypalOrderId: `ADMIN-GRANT-${Date.now()}`,
       amount: 0
     });
+    await payment.populate("user", "fullname username email urlimage");
     res.status(201).json({ message: "Payment created successfully", payment });
   } catch (error) {
     console.error("Error creating payment:", error);
@@ -437,8 +558,7 @@ exports.createPaymentManually = async (req, res) => {
 };
 
 exports.deletePaymentById = async (req, res) => {
-  const reqemail = req.user?.email;
-  if (reqemail !== process.env.EMAIL) {
+  if (!isAdminUser(req.user)) {
     return res.status(403).json({ message: 'Forbidden' });
   }
 
@@ -456,8 +576,7 @@ exports.deletePaymentById = async (req, res) => {
 };
 
 exports.updatePaymentStatus = async (req, res) => {
-  const reqemail = req.user?.email;
-  if (reqemail !== process.env.EMAIL) {
+  if (!isAdminUser(req.user)) {
     return res.status(403).json({ message: 'Forbidden' });
   }
 
@@ -470,6 +589,7 @@ exports.updatePaymentStatus = async (req, res) => {
 
     payment.status = payment.status === "ACTIVE" ? "REFUNDED" : "ACTIVE";
     await payment.save();
+    await payment.populate("user", "fullname username email urlimage");
 
     res.json({ message: "Payment status updated successfully", payment });
   } catch (error) {
